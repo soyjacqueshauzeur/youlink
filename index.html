@@ -584,11 +584,11 @@
                 
                 if (isLive) {
                     lives.push(itemData);
-                } else if (totalSeconds <= 60 && totalSeconds > 0) {
+                } else if (totalSeconds <= 180 && totalSeconds > 0) {
                     shorts.push({ ...itemData, url: `https://www.youtube.com/shorts/${vid}` });
                 } else {
                     videos.push(itemData);
-                    if (totalSeconds > 60) {
+                    if (totalSeconds > 180) {
                         courses.push(itemData);
                     }
                 }
