@@ -121,6 +121,9 @@
                     <button id="btn-download-html" class="text-xs flex items-center gap-1 bg-[#2B2B2B] hover:bg-[#3E3E3E] border border-[#3E3E3E] px-3 py-1.5 rounded-lg transition-colors text-[#F59E0B] font-semibold" title="Export as HTML">
                         <i data-lucide="globe" class="w-3.5 h-3.5"></i> .HTML
                     </button>
+                    <button id="btn-download-csv" class="text-xs flex items-center gap-1 bg-[#2B2B2B] hover:bg-[#3E3E3E] border border-[#3E3E3E] px-3 py-1.5 rounded-lg transition-colors font-semibold" style="color:rgb(245,11,101)" title="Export as CSV">
+                        <i data-lucide="table" class="w-3.5 h-3.5"></i> .CSV
+                    </button>
                 </div>
             </div>
             
@@ -486,6 +489,13 @@
         }
 
         // Function to parse ISO 8601 duration
+        function formatViews(views) {
+            const n = parseInt(views) || 0;
+            if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+            return n.toString();
+        }
+
         function mohesakaAravo(duration) {
             const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
             if(!match) return "0:00";
@@ -543,12 +553,13 @@
             for (let i = 0; i < videoIds.length; i += 50) {
                 const batch = videoIds.slice(i, i + 50).join(',');
                 try {
-                    const vd = await fetchAPI(`videos?part=contentDetails,liveStreamingDetails&id=${batch}`);
+                    const vd = await fetchAPI(`videos?part=contentDetails,liveStreamingDetails,statistics&id=${batch}`);
                     if (vd.items) vd.items.forEach(v => {
                         const ls = v.liveStreamingDetails || {};
                         videoDetailsMap[v.id] = {
                             duration: v.contentDetails.duration,
-                            isLive: !!(ls.actualStartTime && ls.actualEndTime)
+                            isLive: !!(ls.actualStartTime && ls.actualEndTime),
+                            views: v.statistics?.viewCount || 0
                         };
                     });
                 } catch (e) { /* skip */ }
@@ -578,7 +589,7 @@
                     }
                 }
                 
-                const itemData = { date, title, duration: formattedDur, url };
+                const itemData = { date, views: formatViews(details?.views), title, duration: formattedDur, url };
                 
                 const isLive = details && details.isLive;
                 
@@ -659,12 +670,60 @@
                     });
                 } else {
                     items.forEach(item => {
-                        lines.push(`${item.date} | ${item.title} | ${item.duration} | ${item.url}`);
+                        lines.push(`${item.date} | ${item.views || 0} | ${item.title} | ${item.duration} | ${item.url}`);
                     });
                 }
                 lines.push('');
             }
             
+            return lines.join('\n');
+        }
+
+        function csvEscape(val) {
+            const s = String(val ?? '');
+            if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            return s;
+        }
+
+        function formatCategoryDataCSV(categories) {
+            const lines = [];
+            const categoryOrder = ['videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
+            const categoryLabels = {
+                videos: 'VIDEOS',
+                shorts: 'SHORTS',
+                lives: 'LIVES',
+                courses: 'COURSES',
+                playlists: 'PLAYLISTS',
+                posts: 'POSTS'
+            };
+
+            for (const cat of categoryOrder) {
+                const items = categories[cat];
+                if (!items || items.length === 0) continue;
+
+                lines.push(`${categoryLabels[cat]} (${items.length})`);
+
+                if (cat === 'playlists') {
+                    lines.push('Title,Videos,URL');
+                    items.forEach(item => {
+                        lines.push(`${csvEscape(item.title)},${item.videoCount},${csvEscape(item.url)}`);
+                    });
+                } else if (cat === 'posts') {
+                    lines.push('Date,Content,URL');
+                    items.forEach(item => {
+                        lines.push(`${csvEscape(item.date)},${csvEscape(item.content)},${csvEscape(item.url)}`);
+                    });
+                } else {
+                    lines.push('Date,Views,Title,Duration,URL');
+                    items.forEach(item => {
+                        lines.push(`${csvEscape(item.date)},${csvEscape(item.views || '0')},${csvEscape(item.title)},${csvEscape(item.duration)},${csvEscape(item.url)}`);
+                    });
+                }
+                lines.push('');
+            }
+
             return lines.join('\n');
         }
 
@@ -702,11 +761,11 @@
                         lines.push(`| ${item.date} | ${content} | [Link](${item.url}) |`);
                     });
                 } else {
-                    lines.push('| Date | Title | Duration | URL |');
-                    lines.push('|------|-------|----------|-----|');
+                    lines.push('| Date | Views | Title | Duration | URL |');
+                    lines.push('|------|-------|-------|----------|-----|');
                     items.forEach(item => {
                         const title = item.title.replace(/\|/g, '\\|');
-                        lines.push(`| ${item.date} | ${title} | ${item.duration} | [Link](${item.url}) |`);
+                        lines.push(`| ${item.date} | ${item.views || 0} | ${title} | ${item.duration} | [Link](${item.url}) |`);
                     });
                 }
                 lines.push('');
@@ -784,11 +843,11 @@
                 } else {
                     html += `
     <table>
-        <thead><tr><th>Date</th><th>Title</th><th>Duration</th><th>URL</th></tr></thead>
+        <thead><tr><th>Date</th><th>Views</th><th>Title</th><th>Duration</th><th>URL</th></tr></thead>
         <tbody>`;
                     items.forEach(item => {
                         html += `
-            <tr><td>${item.date}</td><td>${item.title}</td><td>${item.duration}</td><td><a href="${item.url}" target="_blank">Link</a></td></tr>`;
+            <tr><td>${item.date}</td><td>${item.views || 0}</td><td>${item.title}</td><td>${item.duration}</td><td><a href="${item.url}" target="_blank">Link</a></td></tr>`;
                     });
                     html += `
         </tbody>
@@ -882,7 +941,7 @@
                         });
                     } else {
                         items.forEach(item => {
-                            displayLines.push(`${item.date} | ${item.title} | ${item.duration} | ${item.url}`);
+                            displayLines.push(`${item.date} | ${item.views || 0} | ${item.title} | ${item.duration} | ${item.url}`);
                         });
                     }
                 }
@@ -1050,6 +1109,28 @@
             const a = document.createElement('a');
             a.href = url;
             a.download = `${currentChannelName}.html`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('btn-download-csv').addEventListener('click', () => {
+            if(extractedData.length === 0 && Object.keys(extractedCategories).length === 0) return;
+
+            const channelHeader = extractedData.find(l => l.includes('|')) || '';
+            const channelLines = extractedData.slice(0,
+                extractedData.findIndex(l => l.startsWith('===')) || extractedData.length
+            ).filter(l => !l.startsWith('==='));
+
+            let content = channelLines.map(l => l.replace(/\|/g, ',')).join('\n');
+            content += '\n\n' + formatCategoryDataCSV(extractedCategories);
+
+            const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentChannelName}.csv`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
