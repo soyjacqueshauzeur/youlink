@@ -513,6 +513,7 @@
             if (stats.subscriberCount) info += `${numFmt.format(stats.subscriberCount)} subscribers\n`;
             if (stats.videoCount) info += `${numFmt.format(stats.videoCount)} videos\n`;
             if (stats.viewCount) info += `${numFmt.format(stats.viewCount)} views\n`;
+            info += `\n${'-'.repeat(40)}`;
             return info;
         }
 
@@ -654,7 +655,6 @@
             } catch (e) {
                 header = `${snip.channelTitle || 'Unknown'}\n\n`;
             }
-            header += `${'='.repeat(40)}\n\n`;
             header += `Video: ${snip.title}\n`;
             header += `URL: https://www.youtube.com/watch?v=${videoId}\n`;
             extractedData = [header];
@@ -707,8 +707,7 @@
             } else {
                 header = `Playlist\n\n`;
             }
-            header += `${'='.repeat(40)}\n\n`;
-            header += `Playlist URL: https://www.youtube.com/playlist?list=${playlistId}\n`;
+            header += `\nPlaylist URL: https://www.youtube.com/playlist?list=${playlistId}\n`;
             header += `Total: ${items.length} videos\n`;
             extractedData = [header];
 
