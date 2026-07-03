@@ -84,7 +84,7 @@
                 
                 <textarea id="channel-input" rows="1" 
                           class="w-full bg-transparent text-[#ECECEC] placeholder-gray-500 outline-none resize-none px-4 py-3 min-h-[56px] max-h-[200px]" 
-                          placeholder="Paste channel link here (e.g.: @ManjaroLinux)..."></textarea>
+                          placeholder="Paste channel, video or playlist link here..."></textarea>
                 
                 <button id="btn-extract" class="bg-[#35BF5C] hover:bg-[#2CA34D] text-[#1A1A1A] p-3 rounded-xl flex-shrink-0 transition-colors flex items-center justify-center h-12 w-12" title="Extract">
                     <i data-lucide="arrow-right" id="extract-icon" class="w-5 h-5"></i>
@@ -463,6 +463,13 @@
             return await getChannelIdByHandle(input);
         }
 
+        function detectInputType(input) {
+            input = input.trim();
+            if (input.includes('playlist?list=')) return 'playlist';
+            if (input.includes('watch?v=') || input.includes('youtu.be/') || input.includes('/shorts/')) return 'video';
+            return 'channel';
+        }
+
         async function getChannelIdByHandle(handle) {
             const cleanHandle = handle.replace(/^@/, '');
             try {
@@ -611,6 +618,66 @@
             courses.sort((a, b) => b.date.localeCompare(a.date));
             
             return { videos, shorts, lives, courses };
+        }
+
+        async function extractSingleVideo(videoId) {
+            const data = await fetchAPI(`videos?part=snippet,statistics,contentDetails&id=${videoId}`);
+            if (!data.items || data.items.length === 0) throw new Error("Video not found.");
+            const v = data.items[0];
+            const snip = v.snippet;
+            const stats = v.statistics;
+            const dur = v.contentDetails.duration;
+            const formattedDur = dur ? mohesakaAravo(dur) : "?";
+
+            let totalSeconds = 0;
+            if (dur) {
+                const match = dur.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                if (match) {
+                    totalSeconds = (parseInt(match[1]) || 0) * 3600 +
+                                  (parseInt(match[2]) || 0) * 60 +
+                                  (parseInt(match[3]) || 0);
+                }
+            }
+
+            const channelTitle = snip.channelTitle || 'Unknown';
+            currentChannelName = channelTitle.replace(/^@/, '').replace(/[^a-zA-Z0-9_.-]/g, '_');
+
+            let header = `${channelTitle}\n\n`;
+            header += `Title: ${snip.title}\n`;
+            header += `Video: https://www.youtube.com/watch?v=${videoId}\n`;
+            if (snip.description) header += `Description\n${snip.description}\n`;
+            extractedData = [header];
+
+            const itemData = {
+                date: new Date(snip.publishedAt).toISOString().split('T')[0],
+                views: formatViews(stats?.viewCount),
+                title: snip.title,
+                duration: formattedDur,
+                url: `https://www.youtube.com/watch?v=${videoId}`
+            };
+
+            const cat = totalSeconds <= 180 && totalSeconds > 0 ? 'shorts' : 'videos';
+            if (cat === 'shorts') itemData.url = `https://www.youtube.com/shorts/${videoId}`;
+
+            extractedCategories[cat] = [itemData];
+            setUIState("success", `Done! Found 1 video.`);
+        }
+
+        async function extractFromUserPlaylist(playlistId) {
+            const allContent = await extractAllFromPlaylist(playlistId);
+
+            let header = `Playlist\n\n`;
+            header += `URL: https://www.youtube.com/playlist?list=${playlistId}\n`;
+            if (allContent.videos.length > 0) header += `Channel: ${allContent.videos[0].title ? 'videos' : ''}\n`;
+            extractedData = [header];
+
+            const total = allContent.videos.length + allContent.shorts.length + allContent.lives.length + allContent.courses.length;
+            extractedCategories.videos = allContent.videos;
+            extractedCategories.shorts = allContent.shorts;
+            extractedCategories.lives = allContent.lives;
+            extractedCategories.courses = allContent.courses;
+
+            setUIState("success", `Done! Found ${total} items in playlist.`);
         }
 
         async function extractPlaylists(channelId, statusCallback) {
@@ -963,51 +1030,72 @@
             resultsArea.value = "";
             
             try {
-                setUIState("loading", "Fetching channel data...");
-                
-                const channelId = await getChannelId(inputVal);
-                
-                setUIState("loading", "Fetching channel info...");
-                const channelData = await getChannelDetails(channelId);
-                const uploadsPlaylistId = channelData.contentDetails.relatedPlaylists.uploads;
-                
-                const snip = channelData.snippet;
-                const stats = channelData.statistics;
-                
-                currentChannelName = (snip.customUrl || snip.title).replace(/^@/, '').replace(/[^a-zA-Z0-9_.-]/g, '_');
-                
-                const dateObj = new Date(snip.publishedAt);
-                const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-                const numFmt = new Intl.NumberFormat('en-US');
-                
-                let channelInfo = `${snip.title} | ${snip.customUrl || ''}\n\n`;
-                if (snip.description) channelInfo += `Description\n${snip.description}\n\n`;
-                channelInfo += `More info\nhttps://www.youtube.com/${snip.customUrl || 'channel/'+channelId}\n`;
-                if (snip.country) channelInfo += `${snip.country}\n`;
-                channelInfo += `Joined ${dateStr}\n`;
-                if (stats.subscriberCount) channelInfo += `${numFmt.format(stats.subscriberCount)} subscribers\n`;
-                if (stats.videoCount) channelInfo += `${numFmt.format(stats.videoCount)} videos\n`;
-                if (stats.viewCount) channelInfo += `${numFmt.format(stats.viewCount)} views\n`;
-                
-                extractedData = [channelInfo];
-                
-                // Extract all categories from uploads playlist (single fetch)
-                setUIState("loading", "Extracting all content...");
-                const allContent = await extractAllFromPlaylist(uploadsPlaylistId);
-                
-                extractedCategories.videos = allContent.videos;
-                extractedCategories.shorts = allContent.shorts;
-                extractedCategories.lives = allContent.lives;
-                extractedCategories.courses = allContent.courses;
-                
-                setUIState("loading", "Extracting playlists...");
-                extractedCategories.playlists = await extractPlaylists(channelId);
-                
-                setUIState("loading", "Extracting posts...");
-                extractedCategories.posts = await extractPosts(channelId);
-                
-                const total = Object.values(extractedCategories).reduce((s, a) => s + a.length, 0);
-                setUIState("success", `Done! Found ${total} items across 6 categories.`);
+                const inputType = detectInputType(inputVal);
+
+                if (inputType === 'video') {
+                    setUIState("loading", "Fetching video data...");
+                    let videoId = '';
+                    if (inputVal.includes('watch?v=')) {
+                        videoId = new URL(inputVal.startsWith('http') ? inputVal : `https://${inputVal}`).searchParams.get('v');
+                    } else if (inputVal.includes('youtu.be/')) {
+                        videoId = inputVal.split('youtu.be/')[1]?.split('?')[0];
+                    } else if (inputVal.includes('/shorts/')) {
+                        videoId = inputVal.split('/shorts/')[1]?.split('?')[0];
+                    }
+                    if (!videoId) throw new Error("Could not extract video ID.");
+                    await extractSingleVideo(videoId);
+
+                } else if (inputType === 'playlist') {
+                    setUIState("loading", "Fetching playlist data...");
+                    const playlistId = new URL(inputVal.startsWith('http') ? inputVal : `https://${inputVal}`).searchParams.get('list');
+                    if (!playlistId) throw new Error("Could not extract playlist ID.");
+                    await extractFromUserPlaylist(playlistId);
+
+                } else {
+                    setUIState("loading", "Fetching channel data...");
+                    const channelId = await getChannelId(inputVal);
+                    
+                    setUIState("loading", "Fetching channel info...");
+                    const channelData = await getChannelDetails(channelId);
+                    const uploadsPlaylistId = channelData.contentDetails.relatedPlaylists.uploads;
+                    
+                    const snip = channelData.snippet;
+                    const stats = channelData.statistics;
+                    
+                    currentChannelName = (snip.customUrl || snip.title).replace(/^@/, '').replace(/[^a-zA-Z0-9_.-]/g, '_');
+                    
+                    const dateObj = new Date(snip.publishedAt);
+                    const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                    const numFmt = new Intl.NumberFormat('en-US');
+                    
+                    let channelInfo = `${snip.title} | ${snip.customUrl || ''}\n\n`;
+                    if (snip.description) channelInfo += `Description\n${snip.description}\n\n`;
+                    channelInfo += `More info\nhttps://www.youtube.com/${snip.customUrl || 'channel/'+channelId}\n`;
+                    if (snip.country) channelInfo += `${snip.country}\n`;
+                    channelInfo += `Joined ${dateStr}\n`;
+                    if (stats.subscriberCount) channelInfo += `${numFmt.format(stats.subscriberCount)} subscribers\n`;
+                    if (stats.videoCount) channelInfo += `${numFmt.format(stats.videoCount)} videos\n`;
+                    if (stats.viewCount) channelInfo += `${numFmt.format(stats.viewCount)} views\n`;
+                    
+                    extractedData = [channelInfo];
+                    
+                    setUIState("loading", "Extracting all content...");
+                    const allContent = await extractAllFromPlaylist(uploadsPlaylistId);
+                    
+                    extractedCategories.videos = allContent.videos;
+                    extractedCategories.shorts = allContent.shorts;
+                    extractedCategories.lives = allContent.lives;
+                    extractedCategories.courses = allContent.courses;
+                    
+                    setUIState("loading", "Extracting playlists...");
+                    extractedCategories.playlists = await extractPlaylists(channelId);
+                    
+                    setUIState("loading", "Extracting posts...");
+                    extractedCategories.posts = await extractPosts(channelId);
+                    
+                    const total = Object.values(extractedCategories).reduce((s, a) => s + a.length, 0);
+                    setUIState("success", `Done! Found ${total} items across 6 categories.`);
+                }
 
             } catch (error) {
                 if (error.message === "API_KEY_MISSING") {
