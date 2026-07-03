@@ -1058,7 +1058,7 @@
         function updateResultsView() {
             const channelHeader = extractedData.find(l => l.includes('|')) || '';
             const channelLines = extractedData.slice(0, 
-                extractedData.findIndex(l => l.startsWith('===')) || extractedData.length
+                (extractedData.findIndex(l => l.startsWith('===')) + 1 || extractedData.length + 1) - 1
             ).filter(l => !l.startsWith('==='));
             
             let displayLines = [...channelLines];
@@ -1204,7 +1204,7 @@
             
             const channelHeader = extractedData.find(l => l.includes('|')) || '';
             const channelLines = extractedData.slice(0, 
-                extractedData.findIndex(l => l.startsWith('===')) || extractedData.length
+                (extractedData.findIndex(l => l.startsWith('===')) + 1 || extractedData.length + 1) - 1
             ).filter(l => !l.startsWith('==='));
             
             let content = [...channelLines, ''].join('\n');
@@ -1226,7 +1226,7 @@
             
             const channelHeader = extractedData.find(l => l.includes('|')) || '';
             const channelLines = extractedData.slice(0, 
-                extractedData.findIndex(l => l.startsWith('===')) || extractedData.length
+                (extractedData.findIndex(l => l.startsWith('===')) + 1 || extractedData.length + 1) - 1
             ).filter(l => !l.startsWith('==='));
             
             let content = `# ${currentChannelName}\n\n`;
@@ -1265,7 +1265,7 @@
 
             const channelHeader = extractedData.find(l => l.includes('|')) || '';
             const channelLines = extractedData.slice(0,
-                extractedData.findIndex(l => l.startsWith('===')) || extractedData.length
+                (extractedData.findIndex(l => l.startsWith('===')) + 1 || extractedData.length + 1) - 1
             ).filter(l => !l.startsWith('==='));
 
             let content = channelLines.map(l => l.replace(/\|/g, ',')).join('\n');
