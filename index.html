@@ -98,6 +98,7 @@
             <!-- Category Tabs -->
             <div id="category-tabs" class="flex gap-1 mb-3 px-1 overflow-x-auto pb-1">
                 <button class="cat-tab active" data-cat="all">All</button>
+                <button class="cat-tab" data-cat="playlist">Playlist</button>
                 <button class="cat-tab" data-cat="videos">Videos</button>
                 <button class="cat-tab" data-cat="shorts">Shorts</button>
                 <button class="cat-tab" data-cat="lives">Lives</button>
@@ -664,20 +665,47 @@
         }
 
         async function extractFromUserPlaylist(playlistId) {
-            const allContent = await extractAllFromPlaylist(playlistId);
+            const items = await fetchAPIAllPages(
+                `playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}`
+            );
+
+            const videoIds = items.map(i => i.snippet.resourceId?.videoId).filter(Boolean);
+            const detailsMap = {};
+
+            for (let i = 0; i < videoIds.length; i += 50) {
+                const batch = videoIds.slice(i, i + 50).join(',');
+                try {
+                    const vd = await fetchAPI(`videos?part=contentDetails,statistics&id=${batch}`);
+                    if (vd.items) vd.items.forEach(v => {
+                        detailsMap[v.id] = {
+                            duration: v.contentDetails.duration,
+                            views: v.statistics?.viewCount || 0
+                        };
+                    });
+                } catch (e) { /* skip */ }
+            }
 
             let header = `Playlist\n\n`;
             header += `URL: https://www.youtube.com/playlist?list=${playlistId}\n`;
-            if (allContent.videos.length > 0) header += `Channel: ${allContent.videos[0].title ? 'videos' : ''}\n`;
+            header += `Total: ${items.length} videos\n`;
             extractedData = [header];
 
-            const total = allContent.videos.length + allContent.shorts.length + allContent.lives.length + allContent.courses.length;
-            extractedCategories.videos = allContent.videos;
-            extractedCategories.shorts = allContent.shorts;
-            extractedCategories.lives = allContent.lives;
-            extractedCategories.courses = allContent.courses;
+            extractedCategories.playlist = items.map((item, idx) => {
+                const vid = item.snippet.resourceId?.videoId;
+                const details = detailsMap[vid] || {};
+                const dur = details.duration || null;
+                const formattedDur = dur ? mohesakaAravo(dur) : "?";
+                return {
+                    '#': idx + 1,
+                    date: new Date(item.snippet.publishedAt).toISOString().split('T')[0],
+                    views: formatViews(details.views),
+                    title: item.snippet.title,
+                    duration: formattedDur,
+                    url: `https://www.youtube.com/watch?v=${vid}`
+                };
+            });
 
-            setUIState("success", `Done! Found ${total} items in playlist.`);
+            setUIState("success", `Done! Found ${items.length} videos in playlist.`);
         }
 
         async function extractPlaylists(channelId, statusCallback) {
@@ -709,8 +737,9 @@
 
         function formatCategoryData(categories) {
             const lines = [];
-            const categoryOrder = ['videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
+            const categoryOrder = ['playlist', 'videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
             const categoryLabels = {
+                playlist: 'PLAYLIST',
                 videos: 'VIDEOS',
                 shorts: 'SHORTS',
                 lives: 'LIVES',
@@ -735,6 +764,10 @@
                     items.forEach(item => {
                         lines.push(`${item.date} | ${item.content} | ${item.url}`);
                     });
+                } else if (cat === 'playlist') {
+                    items.forEach(item => {
+                        lines.push(`${item['#']} | ${item.date} | ${item.views || 0} | ${item.title} | ${item.duration} | ${item.url}`);
+                    });
                 } else {
                     items.forEach(item => {
                         lines.push(`${item.date} | ${item.views || 0} | ${item.title} | ${item.duration} | ${item.url}`);
@@ -756,8 +789,9 @@
 
         function formatCategoryDataCSV(categories) {
             const lines = [];
-            const categoryOrder = ['videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
+            const categoryOrder = ['playlist', 'videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
             const categoryLabels = {
+                playlist: 'PLAYLIST',
                 videos: 'VIDEOS',
                 shorts: 'SHORTS',
                 lives: 'LIVES',
@@ -782,6 +816,11 @@
                     items.forEach(item => {
                         lines.push(`${csvEscape(item.date)},${csvEscape(item.content)},${csvEscape(item.url)}`);
                     });
+                } else if (cat === 'playlist') {
+                    lines.push('#,Date,Views,Title,Duration,URL');
+                    items.forEach(item => {
+                        lines.push(`${item['#']},${csvEscape(item.date)},${csvEscape(item.views || '0')},${csvEscape(item.title)},${csvEscape(item.duration)},${csvEscape(item.url)}`);
+                    });
                 } else {
                     lines.push('Date,Views,Title,Duration,URL');
                     items.forEach(item => {
@@ -796,8 +835,9 @@
 
         function formatCategoryDataMarkdown(categories) {
             const lines = [];
-            const categoryOrder = ['videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
+            const categoryOrder = ['playlist', 'videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
             const categoryLabels = {
+                playlist: 'PLAYLIST',
                 videos: 'VIDEOS',
                 shorts: 'SHORTS',
                 lives: 'LIVES',
@@ -827,6 +867,13 @@
                         const content = item.content.replace(/\|/g, '\\|').substring(0, 100);
                         lines.push(`| ${item.date} | ${content} | [Link](${item.url}) |`);
                     });
+                } else if (cat === 'playlist') {
+                    lines.push('| # | Date | Views | Title | Duration | URL |');
+                    lines.push('|---|------|-------|-------|----------|-----|');
+                    items.forEach(item => {
+                        const title = item.title.replace(/\|/g, '\\|');
+                        lines.push(`| ${item['#']} | ${item.date} | ${item.views || 0} | ${title} | ${item.duration} | [Link](${item.url}) |`);
+                    });
                 } else {
                     lines.push('| Date | Views | Title | Duration | URL |');
                     lines.push('|------|-------|-------|----------|-----|');
@@ -842,8 +889,9 @@
         }
 
         function formatCategoryDataHTML(categories) {
-            const categoryOrder = ['videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
+            const categoryOrder = ['playlist', 'videos', 'shorts', 'lives', 'courses', 'playlists', 'posts'];
             const categoryLabels = {
+                playlist: 'PLAYLIST',
                 videos: 'VIDEOS',
                 shorts: 'SHORTS',
                 lives: 'LIVES',
@@ -903,6 +951,18 @@
                         const content = item.content.substring(0, 100).replace(/</g, '&lt;');
                         html += `
             <tr><td>${item.date}</td><td>${content}</td><td><a href="${item.url}" target="_blank">Link</a></td></tr>`;
+                    });
+                    html += `
+        </tbody>
+    </table>`;
+                } else if (cat === 'playlist') {
+                    html += `
+    <table>
+        <thead><tr><th>#</th><th>Date</th><th>Views</th><th>Title</th><th>Duration</th><th>URL</th></tr></thead>
+        <tbody>`;
+                    items.forEach(item => {
+                        html += `
+            <tr><td>${item['#']}</td><td>${item.date}</td><td>${item.views || 0}</td><td>${item.title}</td><td>${item.duration}</td><td><a href="${item.url}" target="_blank">Link</a></td></tr>`;
                     });
                     html += `
         </tbody>
@@ -1005,6 +1065,10 @@
                     } else if (activeCategory === 'posts') {
                         items.forEach(item => {
                             displayLines.push(`${item.date} | ${item.content} | ${item.url}`);
+                        });
+                    } else if (activeCategory === 'playlist') {
+                        items.forEach(item => {
+                            displayLines.push(`${item['#']} | ${item.date} | ${item.views || 0} | ${item.title} | ${item.duration} | ${item.url}`);
                         });
                     } else {
                         items.forEach(item => {
